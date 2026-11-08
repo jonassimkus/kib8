@@ -17,6 +17,8 @@
 
 #include "core/cpu.cpp"
 
+#include <unordered_map>
+
 CPU cpu = CPU();
 
 static const SDL_DialogFileFilter filters[] = {
@@ -66,6 +68,13 @@ static void SDLCALL callback(void* userdata, const char* const* filelist, int fi
     }
 }
 
+std::unordered_map<uint16_t, uint8_t> key_offsets = {
+    {SDL_SCANCODE_1, 0x1}, {SDL_SCANCODE_2, 0x2}, {SDL_SCANCODE_3, 0x3}, {SDL_SCANCODE_4, 0xC},
+    {SDL_SCANCODE_Q, 0x4}, {SDL_SCANCODE_W, 0x5}, {SDL_SCANCODE_E, 0x6}, {SDL_SCANCODE_R, 0xD},
+    {SDL_SCANCODE_A, 0x7}, {SDL_SCANCODE_S, 0x8}, {SDL_SCANCODE_D, 0x9}, {SDL_SCANCODE_F, 0xE},
+    {SDL_SCANCODE_Z, 0xA}, {SDL_SCANCODE_X, 0x0}, {SDL_SCANCODE_C, 0xB}, {SDL_SCANCODE_V, 0xF},
+};
+
 int main()
 {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
@@ -73,7 +82,7 @@ int main()
         return 1;
     }
 
-    SDL_Window* window = SDL_CreateWindow("kibnes", 1280, 720,
+    SDL_Window* window = SDL_CreateWindow("kibnes", 8*64, 8*32,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window) {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
@@ -116,15 +125,38 @@ int main()
             }
 
             if (event.type == SDL_EVENT_KEY_DOWN){
-                cpu.send_key_press(event.key.scancode);
+                if (key_offsets.contains(event.key.scancode)){
+                 cpu.send_key_press(key_offsets[event.key.scancode]);
+                }
+            }
+
+            if (event.type == SDL_EVENT_KEY_UP){
+                if (key_offsets.contains(event.key.scancode)){
+                 cpu.send_key_release(key_offsets[event.key.scancode]);
+                }
             }
 
             if (event.type == SDL_EVENT_DROP_FILE){
                 const char* dropped_fileDir = event.drop.data;
-                std::cout << dropped_fileDir << std::endl;
-                // Do something with dropped_fileDir here...
 
-                // Free the string allocated by SDL
+                while (*dropped_fileDir) {
+                    size_t size ;
+
+                    void* content{
+                        SDL_LoadFile(dropped_fileDir, &size)
+                    };
+
+                    if (content == NULL){
+                        dropped_fileDir++;
+                        break;
+                    }
+
+                    const uint8_t* rom = static_cast<const uint8_t*>(content);
+
+                    cpu.load_rom(rom, size);
+                    SDL_free(content);
+                    dropped_fileDir++;
+                }
             }
         }
         
@@ -145,8 +177,9 @@ int main()
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             }
 
-            pixel.x = 8 * (pixel_x) + 16;
-            pixel.y = 8 * (pixel_y) + 32;
+            pixel.x = 8 * (pixel_x);
+            pixel.y = 8 * (pixel_y) + ImGui::GetFrameHeight();
+
             SDL_RenderFillRect(renderer, &pixel);
         }
 
@@ -162,6 +195,10 @@ int main()
             {
                 if (ImGui::MenuItem("Open", "Ctrl+O")) {
                     SDL_ShowOpenFileDialog(*callback, NULL, window, filters, 2, NULL, false);
+                }
+
+                if (ImGui::MenuItem("Close", "Ctrl+X")){
+                    cpu.close_rom();
                 }
 
                 ImGui::EndMenu();

@@ -41,7 +41,6 @@ add_executable(kib8 ${APP_SOURCES})
 target_link_libraries(kib8 PRIVATE chip8core imgui SDL3::SDL3)
 
 
-# ===== Warnings (only on your code) =====
 if(MSVC)
     target_compile_options(chip8core PRIVATE /W4)
     target_compile_options(kib8  PRIVATE /W4)

@@ -1,31 +1,14 @@
 #include <X11/Xmd.h>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
+#include <random>
 #include <stack> 
-#include <unordered_map>
+#include <SDL3/SDL.h>
 
 class CPU {
     public:
-
-    std::unordered_map<uint16_t, int> key_offsets = {
-        {30, 1},
-        {31, 2},
-        {32, 3},
-        {34,12},
-        {20,4},
-        {26,5},
-        {8,6},
-        {21,13},
-        {4,7},
-        {22,8},
-        {7,9},
-        {9,14},
-        {29,10},
-        {27,0},
-        {6,11},
-        {25,15}
-    };
 
     uint8_t chip8_fontset[80] = {
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -54,8 +37,23 @@ class CPU {
     std::stack<uint16_t> stack;
     BYTE delay_timer = 0;
     BYTE sound_timer = 0; 
+    std::mt19937 mt{std::random_device{}()};
+    
+    bool screen[64*32] = {};
+    bool crash_flag = false;
 
-    bool screen[64*32];
+    int keys_pressed[16] = {};
+
+    int chip_state = 0;
+    const int IDLE = 0;
+    const int RUNNING = 1;
+    const int CRASHED = 2;
+
+    CPU(){
+        for (int i = 0; i < 80; ++i){
+            memory[0x050+i] = chip8_fontset[i];
+        }
+    }
 
     void set_pixel(int x, int y, bool val){
         screen[y * 64 + x] = val;
@@ -77,29 +75,57 @@ class CPU {
         }
     }
 
-    void draw_letter(int scancode){
-        
-    }
-
     void send_key_press(int scancode){
+        keys_pressed[scancode] = 1;
+    }
+ 
+    void send_key_release(int scancode){
+        keys_pressed[scancode] = 0;
     }
 
-    int load_rom(const uint8_t* rom, size_t size){
+    void reset(){
         const int start_address = 512;
         for (int i = 0; i < 4096-start_address; ++i){
             memory[start_address+i] = 0;
         }
 
-        program_counter = start_address;
+        chip_state = IDLE;
+
+        program_counter = 0;
         stack = std::stack<uint16_t>();
-        v_register[16] = {};
+
+        for (int i = 0; i < 16; ++i){
+            v_register[i] = 0;
+        }
+
+        index_register = 0;
+
+        delay_timer = 0;
+        sound_timer = 0;
+
+        clear_screen();
+    }
+
+    void close_rom(){
+        reset();
+    }   
+
+    int load_rom(const uint8_t* rom, size_t size){
+        if (size >= 3584){
+            SDL_Log("Rom size bigger than 3584 bytes!");
+            return -1;
+        }
+
+        reset();
+        
+        const int start_address = 512;
+
+        chip_state = RUNNING;
 
         for (int i = 0; i < size; ++i){
             memory[start_address+i] = rom[i];
-            //std::cout << (int)rom[i] << std::endl;
         }
-
-        clear_screen();
+        program_counter = 512;
 
         return 0;
     }
@@ -149,17 +175,27 @@ class CPU {
         int NN = (opcode & 0xff);
         int NNN = (opcode & 0xfff);
 
-        int x = v_register[X&63];
-        int y = v_register[Y&31];
-
         switch (nibble) {
             case 0x1:
             program_counter = NNN;
             break;
 
             case 0x0:
-                if (NN == 0xE0){
+                if (NNN == 0x0E0){
                     clear_screen();
+                    break;
+                }
+
+                if (NNN == 0x0EE){
+                    if (stack.empty()){
+                        SDL_LogError(0, "0x00EE was called but stack is empty!");
+                        chip_state = CRASHED;
+                        return;
+                    }
+
+                    program_counter = stack.top();
+                    stack.pop();
+                    break;
                 }
             break;
     
@@ -175,13 +211,129 @@ class CPU {
             v_register[X] += NN;
             break;
 
-            case 0xD:
-            v_register[0xF] = 0;
-            if (v_register[0xF] == 0){
-                int x = v_register[X];
-                int y = v_register[Y];
+            case 0xC:{
+                
+            v_register[X] = mt() & NN;
+            }
+            break;
+
+            case 0x3:
+            if (v_register[X] == NN){
+                program_counter += 2;
+            }
+            break;
+
+            case 0x4:
+            if (v_register[X] != NN){
+                program_counter += 2;
+            }
+            break;
+
+            case 0x2:
+            stack.push(program_counter);
+            program_counter = NNN;
+            break;
+
+            case 0x8:
+            if(N == 0x0){
+                v_register[X] = v_register[Y];
+                break;
+            }
+
+            if (N == 0x7){
+                if (v_register[Y] >= v_register[X]){
+                    v_register[0xF] = 1;
+                }else{
+                    v_register[0xF] = 0;
+                }
+
+                v_register[X] = v_register[Y] - v_register[X];
+                break;
+            }
+
+            if (N == 0x4){
+                if (v_register[X] + v_register[Y] > 255){
+                    v_register[0xF] = 1;
+                }else{
+                    v_register[0xF] = 0;
+                }
+
+                v_register[X] = v_register[X] + v_register[Y];
+                break;
+            }
+
+            if (N == 0x1){
+                v_register[X] = v_register[X] | v_register[Y];
+                break;
+            }
+
+            if (N == 0x2){
+                v_register[X] = v_register[X] & v_register[Y];
+                break;
+            }
+
+            if (N == 0x3){
+                v_register[X] = v_register[X] ^ v_register[Y];
+                break;
+            }
+
+            if (N == 0x5){
+                if (v_register[X] >= v_register[Y]){
+                    v_register[0xF] = 1;
+                }else{
+                    v_register[0xF] = 0;
+                }
+
+                v_register[X] = v_register[X] - v_register[Y];
+                break;
+            }
+
+            if (N == 0xE){
+                int carry = (v_register[Y] >> 7) & 1;
+                v_register[X] = v_register[Y] << 1;
+
+                v_register[0xF] = carry;
+                break;
+            }
+
+            if (N == 0x6){
+                int carry = v_register[Y] & 1;
+                v_register[X] = v_register[Y] >> 1;
+                v_register[0xF] = carry;
+                break;
+            }
+
+            std::cout << "Opcode not implemented!" << std::endl;
+            printf("%04X\n", opcode);
+            chip_state = CRASHED;
+            break;
+
+            case 0xE:
+            if (NN == 0xA1){
+                if (!keys_pressed[v_register[X]]){
+                    program_counter += 2;
+                }
+                break;
+            }
+
+            if (NN == 0x9E){
+                if (keys_pressed[v_register[X]]){
+                    program_counter += 2;
+                }
+                break;
+            }
+            break;
+
+            case 0xD:{
+                v_register[0xF] = 0;
+                int x = v_register[X] & 63;
+                int y = v_register[Y] & 31;
                 for (int i = 0; i < N; ++i){
-                    int sprite_data = memory[index_register+i];
+                    if ((y + i) > 31){
+                        break;
+                    }
+
+                    int sprite_data = memory[(index_register+i) & 0xFFF];
                     for (int j = 0; j < 8; ++j){
                         if ((x + j) > 63){
                             continue;
@@ -203,51 +355,130 @@ class CPU {
             }
             break;
 
+            case 0xF:
+            if (NN == 0x1E){
+                index_register += v_register[X];
+                break;
+            }
+
+            if (NN == 0x0A){
+                program_counter -= 2;
+
+                for (int i = 0; i < 16; ++i){
+                    if (keys_pressed[i] == 1){
+                        program_counter += 2;
+                        v_register[X] = i;
+                        break;
+                    }
+                }
+                break;
+            }
+
+            if (NN == 0x33){
+                memory[(index_register) & 0xFFF] = v_register[X] / 100;
+                memory[(index_register+1) & 0xFFF] = v_register[X] / 10 % 10;
+                memory[(index_register+2) & 0xFFF] = v_register[X]  % 10;
+                break;
+            }
+
+            if (NN == 0x29){
+                index_register = 0x050 + (v_register[X] & 0xF) * 5;
+                break;
+            }
+
+            if (NN == 0x07){
+                v_register[X] = delay_timer;
+                break;
+            }
+
+            if (NN == 0x15){
+                delay_timer = v_register[X];
+                break;
+            }
+
+            if (NN == 0x18){
+                sound_timer = v_register[X];
+                break;
+            }
+
+            if (NN == 0x55){
+                for (int i = 0; i <= X; ++i){
+                    memory[(index_register+i) & 0xFFF] = v_register[i];
+                }
+                break;
+            }
+
+             if (NN == 0x65){
+                for (int i = 0; i <= X; ++i){
+                    v_register[i] = memory[(index_register+i) & 0xFFF];
+                }
+                break;
+            }
+
+            break;
+
+            case 0x5:
+            if (N == 0x0){
+                if (v_register[X] == v_register[Y]){
+                    program_counter += 2;
+                }
+                break;
+            }
+            break;
+
+            case 0x9:
+            if (N == 0x0){
+                if (v_register[X] != v_register[Y]){
+                    program_counter += 2;
+                }
+                break;
+            }
+            break;
+
+            case 0xB:
+            program_counter = NNN + v_register[0];
+            break;
+
             default:
             std::cout << "Opcode not implemented!" << std::endl;
+            printf("%04X\n", opcode);
+            crash_flag = true;
             break;
         }
     }
 
+    void render_pause(){
+        for (int i = 0; i < 12; ++i){
+            set_pixel(27, 10+i, true);
+            set_pixel(28, 10+i, true);
+
+            set_pixel(36, 10+i, true);
+            set_pixel(37, 10+i, true);
+        }
+    }
+
     void tick(){
-        // waiting for rom menu
-        if (program_counter < 512){
-            set_pixel(10, 10, true);
-            set_pixel(10, 11, true);
-            set_pixel(10, 12, true);
-            set_pixel(10, 13, true);
-            set_pixel(10, 14, true);
-            set_pixel(10, 15, true);
-
-            set_pixel(15, 10, true);
-            set_pixel(15, 11, true);
-            set_pixel(15, 12, true);
-            set_pixel(15, 13, true);
-            set_pixel(15, 14, true);
-            set_pixel(15, 15, true);
+        if (chip_state == IDLE){
+            render_pause();
             return;
         }
 
-        // same pause menu for now, error memory overflow
-        if (program_counter >= 4096){
-            set_pixel(10, 10, true);
-            set_pixel(10, 11, true);
-            set_pixel(10, 12, true);
-            set_pixel(10, 13, true);
-            set_pixel(10, 14, true);
-            set_pixel(10, 15, true);
-
-            set_pixel(15, 10, true);
-            set_pixel(15, 11, true);
-            set_pixel(15, 12, true);
-            set_pixel(15, 13, true);
-            set_pixel(15, 14, true);
-            set_pixel(15, 15, true);
+        if (chip_state == CRASHED || program_counter > 4096){
+            render_pause();
             return;
         }
 
-        uint16_t opcode = fetch();
-        printf("%04X\n", opcode);
-        execute(opcode);
+        if (chip_state == RUNNING){
+            update_delay_timer();
+            update_sound_timer();
+
+            for (int i = 0; i <12; ++i){
+                uint16_t opcode = fetch();
+                execute(opcode);
+            }
+
+            return;
+        }
+        //printf("%04X\n", opcode);
     }
 };
