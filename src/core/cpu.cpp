@@ -1,4 +1,4 @@
-#include <X11/Xmd.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -35,8 +35,8 @@ class CPU {
     uint16_t program_counter = 0;
     uint8_t v_register[16] = {};
     std::stack<uint16_t> stack;
-    BYTE delay_timer = 0;
-    BYTE sound_timer = 0;
+    uint8_t delay_timer = 0;
+    uint8_t sound_timer = 0;
     std::mt19937 mt{std::random_device{}()};
 
     bool screen[64*32] = {};

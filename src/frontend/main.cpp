@@ -117,7 +117,7 @@ int main()
         0,0,8,8
     };
 
-    SDL_SetWindowSize(window, 8*64, 8*36+ImGui::GetFrameHeight()+6);
+    SDL_SetWindowSize(window, 8*64, 8*36+ImGui::GetFrameHeight()+12);
 
     while (running) {
         SDL_Event event;
@@ -199,11 +199,11 @@ int main()
         {
             if (ImGui::BeginMenu("File"))
             {
-                if (ImGui::MenuItem("Open", "Ctrl+O")) {
+                if (ImGui::MenuItem("Open")) {
                     SDL_ShowOpenFileDialog(*callback, NULL, window, filters, 2, NULL, false);
                 }
 
-                if (ImGui::MenuItem("Close", "Ctrl+X")){
+                if (ImGui::MenuItem("Close")){
                     cpu.close_rom();
                 }
 
@@ -214,11 +214,12 @@ int main()
 
 
         ImGuiViewport* main_viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos({main_viewport->WorkPos.x, main_viewport->WorkPos.y + main_viewport->WorkSize.y - ImGui::GetFrameHeight()-6});
-        ImGui::SetNextWindowSize({main_viewport->WorkSize.x, (main_viewport->WorkSize.y - 32*8 - ImGui::GetFrameHeight()+6)});
+        ImGui::SetNextWindowPos({main_viewport->WorkPos.x, main_viewport->WorkPos.y + main_viewport->WorkSize.y - ImGui::GetFrameHeight()-12});
+        ImGui::SetNextWindowSize({main_viewport->WorkSize.x, (main_viewport->WorkSize.y - (36*8) - ImGui::GetFrameHeight()-6)});
 
         ImGui::Begin("status", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar);
         
+        ImGui::AlignTextToFramePadding();
         if (cpu.chip_state == 1){
             ImGui::Text("Running");
         }
