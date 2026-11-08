@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <random>
-#include <stack> 
+#include <stack>
 #include <SDL3/SDL.h>
 
 class CPU {
@@ -29,21 +29,22 @@ class CPU {
     0xF0, 0x80, 0xF0, 0x80, 0x80  // F
     };
 
-    
+
     uint8_t memory[4096] = {};
     uint16_t index_register = 0;
     uint16_t program_counter = 0;
     uint8_t v_register[16] = {};
     std::stack<uint16_t> stack;
     BYTE delay_timer = 0;
-    BYTE sound_timer = 0; 
+    BYTE sound_timer = 0;
     std::mt19937 mt{std::random_device{}()};
-    
+
     bool screen[64*32] = {};
     bool crash_flag = false;
 
     int keys_pressed[16] = {};
 
+    int instructions_per_frame = 10;
     int chip_state = 0;
     const int IDLE = 0;
     const int RUNNING = 1;
@@ -76,10 +77,16 @@ class CPU {
     }
 
     void send_key_press(int scancode){
+        if (scancode < 0 || scancode > 15){
+            return;
+        }
         keys_pressed[scancode] = 1;
     }
- 
+
     void send_key_release(int scancode){
+        if (scancode < 0 || scancode > 15){
+            return;
+        }
         keys_pressed[scancode] = 0;
     }
 
@@ -108,16 +115,16 @@ class CPU {
 
     void close_rom(){
         reset();
-    }   
+    }
 
     int load_rom(const uint8_t* rom, size_t size){
-        if (size >= 3584){
+        if (size > 3584){
             SDL_Log("Rom size bigger than 3584 bytes!");
             return -1;
         }
 
         reset();
-        
+
         const int start_address = 512;
 
         chip_state = RUNNING;
@@ -132,7 +139,7 @@ class CPU {
 
     uint8_t program_counter_read(){
         uint8_t byte;
-        byte = memory[program_counter];
+        byte = memory[program_counter & 0xFFF];
         return byte;
     }
 
@@ -159,11 +166,11 @@ class CPU {
     }
 
     uint16_t fetch(){
-        uint8_t first_mem = memory[program_counter];
-        uint8_t second_mem = memory[program_counter+1];
+        uint8_t first_mem = memory[program_counter & 0xFFF];
+        uint8_t second_mem = memory[(program_counter+1) & 0xFFF];
 
         uint16_t opcode = (first_mem << 8) | second_mem;
-        program_counter += 2;
+        program_counter = (program_counter + 2) & 0xFFF;
         return opcode;
     }
 
@@ -198,7 +205,7 @@ class CPU {
                     break;
                 }
             break;
-    
+
             case 0xA:
             index_register = NNN;
             break;
@@ -212,7 +219,7 @@ class CPU {
             break;
 
             case 0xC:{
-                
+
             v_register[X] = mt() & NN;
             }
             break;
@@ -230,6 +237,11 @@ class CPU {
             break;
 
             case 0x2:
+            if (stack.size() >= 16){
+                SDL_LogError(0, "0x2NNN was called but stack is full!");
+                chip_state = CRASHED;
+                return;
+            }
             stack.push(program_counter);
             program_counter = NNN;
             break;
@@ -241,24 +253,24 @@ class CPU {
             }
 
             if (N == 0x7){
+                int flag = 0;
                 if (v_register[Y] >= v_register[X]){
-                    v_register[0xF] = 1;
-                }else{
-                    v_register[0xF] = 0;
+                    flag = 1;
                 }
 
                 v_register[X] = v_register[Y] - v_register[X];
+                v_register[0xF] = flag;
                 break;
             }
 
             if (N == 0x4){
+                int flag = 0;
                 if (v_register[X] + v_register[Y] > 255){
-                    v_register[0xF] = 1;
-                }else{
-                    v_register[0xF] = 0;
+                    flag = 1;
                 }
 
                 v_register[X] = v_register[X] + v_register[Y];
+                v_register[0xF] = flag;
                 break;
             }
 
@@ -278,13 +290,13 @@ class CPU {
             }
 
             if (N == 0x5){
+                int flag = 0;
                 if (v_register[X] >= v_register[Y]){
-                    v_register[0xF] = 1;
-                }else{
-                    v_register[0xF] = 0;
+                    flag = 1;
                 }
 
                 v_register[X] = v_register[X] - v_register[Y];
+                v_register[0xF] = flag;
                 break;
             }
 
@@ -310,14 +322,14 @@ class CPU {
 
             case 0xE:
             if (NN == 0xA1){
-                if (!keys_pressed[v_register[X]]){
+                if (!keys_pressed[v_register[X] & 0xF]){
                     program_counter += 2;
                 }
                 break;
             }
 
             if (NN == 0x9E){
-                if (keys_pressed[v_register[X]]){
+                if (keys_pressed[v_register[X] & 0xF]){
                     program_counter += 2;
                 }
                 break;
@@ -436,7 +448,7 @@ class CPU {
             break;
 
             case 0xB:
-            program_counter = NNN + v_register[0];
+            program_counter = (NNN + v_register[0]) & 0xFFF;
             break;
 
             default:
@@ -472,7 +484,7 @@ class CPU {
             update_delay_timer();
             update_sound_timer();
 
-            for (int i = 0; i <12; ++i){
+            for (int i = 0; i <instructions_per_frame; ++i){
                 uint16_t opcode = fetch();
                 execute(opcode);
             }

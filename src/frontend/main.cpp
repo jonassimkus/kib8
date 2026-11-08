@@ -16,6 +16,7 @@
 #include "imgui_impl_sdlrenderer3.h"
 
 #include "core/cpu.cpp"
+#include "imgui_internal.h"
 
 #include <unordered_map>
 
@@ -82,8 +83,8 @@ int main()
         return 1;
     }
 
-    SDL_Window* window = SDL_CreateWindow("kibnes", 8*64, 8*32,
-        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    SDL_Window* window = SDL_CreateWindow("kibnes", 8*64, 8*33+19,
+        SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window) {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
         return 1;
@@ -107,11 +108,16 @@ int main()
     ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
     ImGui_ImplSDLRenderer3_Init(renderer);
 
+
     bool running = true;
+
+    int instructions_per_frame = 10;
 
     SDL_FRect pixel = {
         0,0,8,8
     };
+
+    SDL_SetWindowSize(window, 8*64, 8*36+ImGui::GetFrameHeight()+6);
 
     while (running) {
         SDL_Event event;
@@ -206,12 +212,59 @@ int main()
             ImGui::EndMainMenuBar();
         }
 
+
+        ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos({main_viewport->WorkPos.x, main_viewport->WorkPos.y + main_viewport->WorkSize.y - ImGui::GetFrameHeight()-6});
+        ImGui::SetNextWindowSize({main_viewport->WorkSize.x, (main_viewport->WorkSize.y - 32*8 - ImGui::GetFrameHeight()+6)});
+
+        ImGui::Begin("status", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar);
+        
+        if (cpu.chip_state == 1){
+            ImGui::Text("Running");
+        }
+        if (cpu.chip_state == 0){
+            ImGui::Text("Idle");
+        }
+        if (cpu.chip_state == 2){
+            ImGui::Text("Crashed");
+        }
+        if (cpu.chip_state == 3){
+            ImGui::Text("Paused");
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(90);
+        ImGui::SliderInt("Instructions per tick", &instructions_per_frame, 0, 100);
+        ImGui::SameLine();
+        if(ImGui::Button("Pause")){
+            if (cpu.chip_state == 1){
+                cpu.chip_state = 3;
+            }else if(cpu.chip_state == 3){
+                cpu.chip_state = 1;
+            }
+        }
+
+        ImGui::SameLine();
+        if(ImGui::Button("Step") && cpu.chip_state == 3){
+            cpu.update_delay_timer();
+            cpu.update_sound_timer();
+
+            for (int i = 0; i < instructions_per_frame; ++i){
+                uint16_t opcode = cpu.fetch();
+                cpu.execute(opcode);
+            }
+        }
+
+        ImGui::End();
+
         ImGui::Render();
+
 
         ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
         SDL_RenderPresent(renderer);
 
         SDL_DelayNS(SDL_MS_TO_NS(1.43));
+
+        cpu.instructions_per_frame = instructions_per_frame;
     }
 
     ImGui_ImplSDLRenderer3_Shutdown();
