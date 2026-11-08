@@ -2,6 +2,8 @@
 
 A CHIP-8 emulator written with SDl3 and ImGui in c++. A learning project before moving on to the NES. :)
 
+<img width="512" height="306" alt="Tests Running" src="https://github.com/user-attachments/assets/718e6191-fa3b-4b30-ae1f-a4ae03e00578" />
+
 ## Features
 
 - Load ROMs from the **File → Open** menu or by drag and drop
